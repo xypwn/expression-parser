@@ -68,8 +68,9 @@ void tokenize(char *expr) {
 		if (IS_FLOAT(c) ||
 				(can_be_neg_num && c == '-' && IS_FLOAT(curr[1]))) {
 			char buf[16];
-			size_t i = 0;
-			while (IS_FLOAT(curr[i]) && i < 15) {
+			buf[0] = c;
+			size_t i = 1;
+			while (i < 15 && IS_FLOAT(curr[i])) {
 				buf[i] = curr[i];
 				i++;
 			}
