@@ -11,11 +11,13 @@ typedef struct Tok {
 	enum {
 		TokOp,
 		TokNum,
+		TokFunc,
 	} kind;
 
 	union {
 		real Num;
 		char Char;
+		char *Str;
 	};
 } Tok;
 
@@ -47,6 +49,7 @@ enum {
 };
 
 #define IS_FLOAT(c) ((c >= '0' && c <= '9') || c == '.')
+#define IS_ALPHA(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
 
 void push_tok(Tok t) {
 	if (toks_size+1 < TOKS_CAP)
@@ -80,6 +83,23 @@ void tokenize(char *expr) {
 			real num = strtod(buf, NULL);
 
 			push_tok((Tok){.kind = TokNum, .Num = num});
+
+			can_be_neg_num = false;
+			continue;
+		}
+
+		if (IS_ALPHA(c)) {
+			char *buf = malloc(32);
+			buf[0] = c;
+			size_t i = 1;
+			while (i < 31 && IS_ALPHA(curr[i])) {
+				buf[i] = curr[i];
+				i++;
+			}
+			curr += i - 1;
+			buf[i++] = 0;
+
+			push_tok((Tok){.kind = TokFunc, .Str = buf});
 
 			can_be_neg_num = false;
 			continue;
@@ -135,6 +155,9 @@ void print_toks() {
 		case TokNum:
 			printf("%.2f ", toks[i].Num);
 			break;
+		case TokFunc:
+			printf("%s ", toks[i].Str);
+			break;
 		default:
 			fprintf(stderr, "Error: unhandled token\n");
 			exit(1);
@@ -160,10 +183,38 @@ real eval(Tok *t) {
 			real res = eval(t + 1);
 			size_t i;
 			for (i = 2; !(t[i].kind == TokOp && t[i].Char == ')'); i++);
-			del_toks(t + 1, t + i);
+			del_toks(t + 2, t + i + 1);
 			/* Put the newly evaluated value into place. */
 			t[1].kind = TokNum;
 			t[1].Num = res;
+		}
+
+
+		/* Collapse function. */
+		if (t[1].kind == TokFunc) {
+			print_toks();
+
+			if (!(t[2].kind == TokOp && t[2].Char == '(') || t + 2 >= toks + toks_size) {
+				fprintf(stderr, "Error: expected '(' token after function\n");
+				exit(1);
+			}
+
+			real inner_res = eval(t + 2);
+			size_t i;
+			for (i = 3; !(t[i].kind == TokOp && t[i].Char == ')'); i++);
+			del_toks(t + 2, t + i + 1);
+
+			real outer_res;
+			if (strcmp(t[1].Str, "sqrt") == 0) {
+				outer_res = sqrt(inner_res);
+			} else {
+				fprintf(stderr, "Error: unknown function name: %s\n", t[1].Str);
+				exit(1);
+			}
+			t[1].kind = TokNum;
+			t[1].Num = outer_res;
+
+			print_toks();
 		}
 		
 		if (!(t[0].kind == TokOp && t[1].kind == TokNum && t[2].kind == TokOp)) {
@@ -205,6 +256,13 @@ real eval(Tok *t) {
 	}
 }
 
+void cleanup() {
+	for (size_t i = 0; i < toks_size; i++) {
+		if (toks[i].kind == TokFunc)
+			free(toks[i].Str);
+	}
+}
+
 int main(int argc, char **argv) {
 	if (argc != 2 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
 		fprintf(stderr, "Usage: ./exp \"<expression>\"\n");
@@ -214,4 +272,5 @@ int main(int argc, char **argv) {
 	print_toks();
 	real res = eval(toks);
 	printf("Result: %f\n", res);
+	cleanup();
 }
