@@ -26,8 +26,9 @@ Tok toks[TOKS_CAP];
 size_t toks_size = 0;
 
 uint8_t op_prec[256] = {
-	['('] = 0,
+	['('] = 0, /* A precedence of 0 is reserved for delimiters. */
 	[')'] = 0,
+	[','] = 0,
 	['+'] = 1,
 	['-'] = 1,
 	['*'] = 2,
@@ -118,6 +119,7 @@ void tokenize(char *expr) {
 		switch (c) {
 		case '(':
 		case ')':
+		case ',':
 		case '+':
 		case '-':
 		case '*':
@@ -172,8 +174,8 @@ void del_toks(Tok *begin, Tok *end) {
 }
 
 real eval(Tok *t) {
-	if (!(t[0].kind == TokOp && t[0].Char == '(')) {
-		fprintf(stderr, "Error: expected '(' at beginning of expression\n");
+	if (!(t[0].kind == TokOp && op_prec[(size_t)t[0].Char] == 0)) {
+		fprintf(stderr, "Error: expected delimiter at beginning of expression\n");
 		exit(1);
 	}
 
@@ -182,7 +184,7 @@ real eval(Tok *t) {
 		if (t[1].kind == TokOp && t[1].Char == '(') {
 			real res = eval(t + 1);
 			size_t i;
-			for (i = 2; !(t[i].kind == TokOp && t[i].Char == ')'); i++);
+			for (i = 2; !(t[i].kind == TokOp && op_prec[(size_t)t[i].Char] == 0); i++);
 			del_toks(t + 2, t + i + 1);
 			/* Put the newly evaluated value into place. */
 			t[1].kind = TokNum;
@@ -192,29 +194,48 @@ real eval(Tok *t) {
 
 		/* Collapse function. */
 		if (t[1].kind == TokFunc) {
-			print_toks();
-
-			if (!(t[2].kind == TokOp && t[2].Char == '(') || t + 2 >= toks + toks_size) {
+			if (t + 2 >= toks + toks_size || !(t[2].kind == TokOp && t[2].Char == '(')) {
 				fprintf(stderr, "Error: expected '(' token after function\n");
 				exit(1);
 			}
 
-			real inner_res = eval(t + 2);
-			size_t i;
-			for (i = 3; !(t[i].kind == TokOp && t[i].Char == ')'); i++);
-			del_toks(t + 2, t + i + 1);
+			real arg_results[16];
+			size_t arg_results_size = 0;
+
+			t += 2;
+			while (1) {
+				arg_results[arg_results_size++] = eval(t); /* TODO: Overflow protection. */
+				size_t i = 1;
+				for (; !(t[i].kind == TokOp && op_prec[(size_t)t[i].Char] == 0); i++);
+				bool end = t[i].Char == ')';
+				if (t[i].Char == ',')
+					del_toks(t, t + i);
+				else if (t[i].Char == ')')
+					del_toks(t, t + i + 1);
+				if (end)
+					break;
+			}
+			t -= 2;
 
 			real outer_res;
 			if (strcmp(t[1].Str, "sqrt") == 0) {
-				outer_res = sqrt(inner_res);
+				if (arg_results_size != 1) {
+					fprintf(stderr, "Error: function sqrt() requires exactly 1 argument\n");
+					exit(1);
+				}
+				outer_res = sqrt(arg_results[0]);
+			} else if (strcmp(t[1].Str, "pow") == 0) {
+				if (arg_results_size != 2) {
+					fprintf(stderr, "Error: function pow() requires exactly 2 arguments\n");
+					exit(1);
+				}
+				outer_res = pow(arg_results[0], arg_results[1]);
 			} else {
 				fprintf(stderr, "Error: unknown function name: %s\n", t[1].Str);
 				exit(1);
 			}
 			t[1].kind = TokNum;
 			t[1].Num = outer_res;
-
-			print_toks();
 		}
 		
 		if (!(t[0].kind == TokOp && t[1].kind == TokNum && t[2].kind == TokOp)) {
@@ -228,7 +249,8 @@ real eval(Tok *t) {
 		const char next_op = t[2].Char;
 		const uint8_t next_prec = op_prec[(size_t)next_op];
 
-		if (curr_op == '(' && next_op == ')')
+		/* Delimiters have a precedence of 0; if we have a number between two delimiters, we're done. */
+		if (curr_prec == 0 && next_prec == 0)
 			return t[1].Num;
 
 		if (next_prec > curr_prec || (next_prec == curr_prec && op_order[(size_t)curr_op] == OrderRtl)) {
