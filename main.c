@@ -35,6 +35,7 @@ uint8_t op_prec[256] = {
 	['/'] = 2,
 	['^'] = 3,
 };
+#define OP_PREC(tok_char) (op_prec[(size_t)tok_char])
 
 enum {
 	OrderLtr,
@@ -48,6 +49,7 @@ enum {
 	['/'] = OrderLtr,
 	['^'] = OrderRtl,
 };
+#define OP_ORDER(tok_char) (op_order[(size_t)tok_char])
 
 #define IS_FLOAT(c) ((c >= '0' && c <= '9') || c == '.')
 #define IS_ALPHA(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
@@ -166,7 +168,7 @@ void del_toks(Tok *begin, Tok *end) {
 }
 
 real eval(Tok *t) {
-	if (!(t[0].kind == TokOp && op_prec[(size_t)t[0].Char] == 0)) {
+	if (!(t[0].kind == TokOp && OP_PREC(t[0].Char) == 0)) {
 		fprintf(stderr, "Error: expected delimiter at beginning of expression\n");
 		exit(1);
 	}
@@ -186,7 +188,7 @@ real eval(Tok *t) {
 		if (t[1].kind == TokOp && t[1].Char == '(') {
 			real res = eval(t + 1);
 			size_t i;
-			for (i = 2; !(t[i].kind == TokOp && op_prec[(size_t)t[i].Char] == 0); i++);
+			for (i = 2; !(t[i].kind == TokOp && OP_PREC(t[i].Char) == 0); i++);
 			del_toks(t + 2, t + i + 1);
 			/* Put the newly evaluated value into place. */
 			t[1].kind = TokNum;
@@ -208,7 +210,7 @@ real eval(Tok *t) {
 			while (1) {
 				arg_results[arg_results_size++] = eval(t); /* TODO: Overflow protection. */
 				size_t i = 1;
-				for (; !(t[i].kind == TokOp && op_prec[(size_t)t[i].Char] == 0); i++);
+				for (; !(t[i].kind == TokOp && OP_PREC(t[i].Char) == 0); i++);
 				bool end = t[i].Char == ')';
 				if (t[i].Char == ',')
 					del_toks(t, t + i);
@@ -246,18 +248,18 @@ real eval(Tok *t) {
 		}
 
 		const char curr_op = t[0].Char;
-		const uint8_t curr_prec = op_prec[(size_t)curr_op];
+		const uint8_t curr_prec = OP_PREC(curr_op);
 
 		const char next_op = t[2].Char;
-		const uint8_t next_prec = op_prec[(size_t)next_op];
+		const uint8_t next_prec = OP_PREC(next_op);
 
 		/* Delimiters have a precedence of 0; if we have a number between two delimiters, we're done. */
 		if (curr_prec == 0 && next_prec == 0)
 			return t[1].Num;
 
-		if (next_prec > curr_prec || (next_prec == curr_prec && op_order[(size_t)curr_op] == OrderRtl)) {
+		if (next_prec > curr_prec || (next_prec == curr_prec && OP_ORDER(curr_op) == OrderRtl)) {
 			t += 2;
-		} else if (next_prec < curr_prec || (next_prec == curr_prec && op_order[(size_t)curr_op] == OrderLtr)) {
+		} else if (next_prec < curr_prec || (next_prec == curr_prec && OP_ORDER(curr_op) == OrderLtr)) {
 			real res;
 			real lhs = t[-1].Num, rhs = t[1].Num;
 			switch (curr_op) {
