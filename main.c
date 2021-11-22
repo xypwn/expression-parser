@@ -62,15 +62,12 @@ void tokenize(char *expr) {
 
 	size_t paren_depth = 0;
 
-	bool can_be_neg_num = true;
-
 	char *curr = expr;
 	for (char c = *curr; c != 0; c = *(++curr)) {
 		if (c == ' ')
 			continue;
 
-		if (IS_FLOAT(c) ||
-				(can_be_neg_num && c == '-' && IS_FLOAT(curr[1]))) {
+		if (IS_FLOAT(c)) {
 			char buf[16];
 			buf[0] = c;
 			size_t i = 1;
@@ -84,8 +81,6 @@ void tokenize(char *expr) {
 			real num = strtod(buf, NULL);
 
 			push_tok((Tok){.kind = TokNum, .Num = num});
-
-			can_be_neg_num = false;
 			continue;
 		}
 
@@ -101,8 +96,6 @@ void tokenize(char *expr) {
 			buf[i++] = 0;
 
 			push_tok((Tok){.kind = TokFunc, .Str = buf});
-
-			can_be_neg_num = false;
 			continue;
 		}
 
@@ -132,8 +125,6 @@ void tokenize(char *expr) {
 			fprintf(stderr, "Error: unrecognized token at %zd: '%c'\n", curr - expr, c);
 			exit(1);
 		}
-
-		can_be_neg_num = c != ')';
 	}
 
 	if (paren_depth > 0) {
@@ -168,6 +159,7 @@ void print_toks() {
 	printf("\n");
 }
 
+/* Delete tokens from begin to end (excluding end itself). */
 void del_toks(Tok *begin, Tok *end) {
 	memmove(begin, end, (toks_size - (end - toks)) * sizeof(Tok));
 	toks_size -= end - begin;
@@ -180,6 +172,16 @@ real eval(Tok *t) {
 	}
 
 	while (1) {
+		/* Collapse factor. */
+		if (t[1].kind == TokOp && t[1].Char == '-') {
+			if (t[2].kind != TokNum) {
+				fprintf(stderr, "Error: expected number token after minus factor\n");
+				exit(1);
+			}
+			t[2].Num *= -1.0;
+			del_toks(t + 1, t + 2);
+		}
+
 		/* Collapse parentheses. */
 		if (t[1].kind == TokOp && t[1].Char == '(') {
 			real res = eval(t + 1);
