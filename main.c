@@ -65,12 +65,12 @@ static Function functions[FUNCTIONS_CAP];
 static size_t functions_size = 0;
 
 static void push_tok(Tok t) {
-	if (toks_size+1 < TOKS_CAP)
+	if (toks_size < TOKS_CAP)
 		toks[toks_size++] = t;
 }
 
 static void add_func(const char *name, real (*func)(real *args), size_t n_args) {
-	if (functions_size+1 < FUNCTIONS_CAP)
+	if (functions_size < FUNCTIONS_CAP)
 		functions[functions_size++] = (Function){.name = name, .func = func, .n_args = n_args};
 }
 
@@ -223,7 +223,8 @@ static real eval(Tok *t) {
 
 			t += 2;
 			while (1) {
-				arg_results[arg_results_size++] = eval(t); /* TODO: Overflow protection. */
+				if (arg_results_size < 16)
+					arg_results[arg_results_size++] = eval(t);
 				size_t i = 1;
 				for (; !(t[i].kind == TokOp && OP_PREC(t[i].Char) == 0); i++);
 				bool end = t[i].Char == ')';
