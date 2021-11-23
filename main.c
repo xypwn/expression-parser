@@ -22,10 +22,10 @@ typedef struct Tok {
 } Tok;
 
 #define TOKS_CAP 65536
-Tok toks[TOKS_CAP];
-size_t toks_size = 0;
+static Tok toks[TOKS_CAP];
+static size_t toks_size = 0;
 
-uint8_t op_prec[256] = {
+static uint8_t op_prec[256] = {
 	['('] = 0, /* A precedence of 0 is reserved for delimiters. */
 	[')'] = 0,
 	[','] = 0,
@@ -37,7 +37,7 @@ uint8_t op_prec[256] = {
 };
 #define OP_PREC(tok_char) (op_prec[(size_t)tok_char])
 
-enum {
+static enum {
 	OrderLtr,
 	OrderRtl,
 } op_order[256] = {
@@ -61,20 +61,20 @@ typedef struct Function {
 } Function;
 
 #define FUNCTIONS_CAP 256
-Function functions[FUNCTIONS_CAP];
-size_t functions_size = 0;
+static Function functions[FUNCTIONS_CAP];
+static size_t functions_size = 0;
 
-void push_tok(Tok t) {
+static void push_tok(Tok t) {
 	if (toks_size+1 < TOKS_CAP)
 		toks[toks_size++] = t;
 }
 
-void add_func(const char *name, real (*func)(real *args), size_t n_args) {
+static void add_func(const char *name, real (*func)(real *args), size_t n_args) {
 	if (functions_size+1 < FUNCTIONS_CAP)
 		functions[functions_size++] = (Function){.name = name, .func = func, .n_args = n_args};
 }
 
-void tokenize(char *expr) {
+static void tokenize(char *expr) {
 	push_tok((Tok){.kind = TokOp, .Char = '('});
 
 	size_t paren_depth = 0;
@@ -152,7 +152,7 @@ void tokenize(char *expr) {
 	push_tok((Tok){.kind = TokOp, .Char = ')'});
 }
 
-void print_toks() {
+static void print_toks() {
 	for (size_t i = 0; i < toks_size; i++) {
 		switch (toks[i].kind) {
 		case TokOp:
@@ -177,12 +177,12 @@ void print_toks() {
 }
 
 /* Delete tokens from begin to end (excluding end itself). */
-void del_toks(Tok *begin, Tok *end) {
+static void del_toks(Tok *begin, Tok *end) {
 	memmove(begin, end, (toks_size - (end - toks)) * sizeof(Tok));
 	toks_size -= end - begin;
 }
 
-real eval(Tok *t) {
+static real eval(Tok *t) {
 	if (!(t[0].kind == TokOp && OP_PREC(t[0].Char) == 0)) {
 		fprintf(stderr, "Error: expected delimiter at beginning of expression\n");
 		exit(1);
@@ -298,19 +298,19 @@ real eval(Tok *t) {
 	}
 }
 
-void cleanup() {
+static void cleanup() {
 	for (size_t i = 0; i < toks_size; i++) {
 		if (toks[i].kind == TokFunc)
 			free(toks[i].Str);
 	}
 }
 
-real fn_sqrt(real *args)  { return sqrt(args[0]); }
-real fn_pow(real *args)   { return pow(args[0], args[1]); }
-real fn_mod(real *args)   { return fmod(args[0], args[1]); }
-real fn_round(real *args) { return round(args[0]); }
-real fn_floor(real *args) { return floor(args[0]); }
-real fn_ceil(real *args)  { return ceil(args[0]); }
+static real fn_sqrt(real *args)  { return sqrt(args[0]); }
+static real fn_pow(real *args)   { return pow(args[0], args[1]); }
+static real fn_mod(real *args)   { return fmod(args[0], args[1]); }
+static real fn_round(real *args) { return round(args[0]); }
+static real fn_floor(real *args) { return floor(args[0]); }
+static real fn_ceil(real *args)  { return ceil(args[0]); }
 
 int main(int argc, char **argv) {
 	if (argc != 2 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
