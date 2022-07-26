@@ -9,9 +9,10 @@ typedef double real;
 
 typedef struct Tok {
 	enum {
+		TokNull,
 		TokOp,
 		TokNum,
-		TokFunc,
+		TokIdent,
 	} kind;
 
 	union {
@@ -54,6 +55,35 @@ static enum {
 #define IS_FLOAT(c) ((c >= '0' && c <= '9') || c == '.')
 #define IS_ALPHA(c) ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
 
+typedef struct Var {
+	const char *name;
+	real val;
+} Var;
+
+#define VARS_CAP 256
+static Var vars[VARS_CAP];
+static size_t vars_size = 0;
+
+static void set_var(const char *name, real val) {
+	for (size_t i = 0; i < vars_size; i++) {
+		if (strcmp(vars[i].name, name) == 0) {
+			vars[i].val = val;
+			return;
+		}
+	}
+	vars[vars_size++] = (Var){.name = name, .val = val};
+}
+
+static void unset_var(const char *name) {
+	for (size_t i = 0; i < vars_size; i++) {
+		if (strcmp(vars[i].name, name) == 0) {
+			memmove(vars + i, vars + i + 1, sizeof(Var) * (vars_size - (i + 1)));
+			vars_size--;
+			return;
+		}
+	}
+}
+
 typedef struct Function {
 	const char *name;
 	real (*func)(real *args);
@@ -79,8 +109,15 @@ static void tokenize(char *expr) {
 
 	size_t paren_depth = 0;
 
+	Tok last;
+
 	char *curr = expr;
 	for (char c = *curr; c != 0; c = *(++curr)) {
+		if (toks_size > 0)
+			last = toks[toks_size-1];
+		else
+			last = (Tok){.kind = TokNull};
+
 		if (c == ' ')
 			continue;
 
@@ -97,6 +134,9 @@ static void tokenize(char *expr) {
 
 			real num = strtod(buf, NULL);
 
+			if (last.kind == TokIdent || (last.kind == TokOp && last.Char == ')') || last.kind == TokNum)
+				push_tok((Tok){.kind = TokOp, .Char = '*'});
+
 			push_tok((Tok){.kind = TokNum, .Num = num});
 			continue;
 		}
@@ -112,7 +152,10 @@ static void tokenize(char *expr) {
 			curr += i - 1;
 			buf[i++] = 0;
 
-			push_tok((Tok){.kind = TokFunc, .Str = buf});
+			if (last.kind == TokIdent || (last.kind == TokOp && last.Char == ')') || last.kind == TokNum)
+				push_tok((Tok){.kind = TokOp, .Char = '*'});
+
+			push_tok((Tok){.kind = TokIdent, .Str = buf});
 			continue;
 		}
 
@@ -135,6 +178,8 @@ static void tokenize(char *expr) {
 		case '*':
 		case '/':
 		case '^': {
+			if (c == '(' && ((last.kind == TokOp && last.Char == ')') || last.kind == TokNum))
+				push_tok((Tok){.kind = TokOp, .Char = '*'});
 			push_tok((Tok){.kind = TokOp, .Char = c});
 			break;
 		}
@@ -165,7 +210,7 @@ static void print_toks() {
 		case TokNum:
 			printf("%.2f ", toks[i].Num);
 			break;
-		case TokFunc:
+		case TokIdent:
 			printf("%s ", toks[i].Str);
 			break;
 		default:
@@ -182,42 +227,35 @@ static void del_toks(Tok *begin, Tok *end) {
 	toks_size -= end - begin;
 }
 
-static real eval(Tok *t) {
-	if (!(t[0].kind == TokOp && OP_PREC(t[0].Char) == 0)) {
-		fprintf(stderr, "Error: expected delimiter at beginning of expression\n");
-		exit(1);
+static real eval(Tok *t);
+
+static void collapse(Tok *t) {
+	/* Collapse factor. */
+	if (t[1].kind == TokOp && t[1].Char == '-') {
+		collapse(t + 1);
+		if (t[2].kind != TokNum) {
+			fprintf(stderr, "Error: uncollapsable expression after minus factor\n");
+			exit(1);
+		}
+		t[2].Num *= -1.0;
+		del_toks(t + 1, t + 2);
 	}
 
-	while (1) {
-		/* Collapse factor. */
-		if (t[1].kind == TokOp && t[1].Char == '-') {
-			if (t[2].kind != TokNum) {
-				fprintf(stderr, "Error: expected number token after minus factor\n");
-				exit(1);
-			}
-			t[2].Num *= -1.0;
-			del_toks(t + 1, t + 2);
-		}
-
-		/* Collapse parentheses. */
-		if (t[1].kind == TokOp && t[1].Char == '(') {
-			real res = eval(t + 1);
-			size_t i;
-			for (i = 2; !(t[i].kind == TokOp && OP_PREC(t[i].Char) == 0); i++);
-			del_toks(t + 2, t + i + 1);
-			/* Put the newly evaluated value into place. */
-			t[1].kind = TokNum;
-			t[1].Num = res;
-		}
+	/* Collapse parentheses. */
+	if (t[1].kind == TokOp && t[1].Char == '(') {
+		real res = eval(t + 1);
+		size_t i;
+		for (i = 2; !(t[i].kind == TokOp && OP_PREC(t[i].Char) == 0); i++);
+		del_toks(t + 2, t + i + 1);
+		/* Put the newly evaluated value into place. */
+		t[1].kind = TokNum;
+		t[1].Num = res;
+	}
 
 
-		/* Collapse function. */
-		if (t[1].kind == TokFunc) {
-			if (t + 2 >= toks + toks_size || !(t[2].kind == TokOp && t[2].Char == '(')) {
-				fprintf(stderr, "Error: expected '(' token after function\n");
-				exit(1);
-			}
-
+	if (t[1].kind == TokIdent) {
+		if (t + 2 < toks + toks_size && (t[2].kind == TokOp && t[2].Char == '(')) {
+			/* Collapse function. */
 			real arg_results[16];
 			size_t arg_results_size = 0;
 
@@ -257,8 +295,35 @@ static real eval(Tok *t) {
 
 			t[1].kind = TokNum;
 			t[1].Num = outer_res;
+		} else {
+			/* Collapse variable. */
+			real res;
+			bool found = false;
+			for (size_t i = 0; i < vars_size; i++) {
+				if (strcmp(t[1].Str, vars[i].name) == 0) {
+					found = true;
+					res = vars[i].val;
+				}
+			}
+			if (!found) {
+				fprintf(stderr, "Error: unknown variable: %s\n", t[1].Str);
+				exit(1);
+			}
+			t[1].kind = TokNum;
+			t[1].Num = res;
 		}
-		
+	}
+}
+
+static real eval(Tok *t) {
+	if (!(t[0].kind == TokOp && OP_PREC(t[0].Char) == 0)) {
+		fprintf(stderr, "Error: expected delimiter at beginning of expression\n");
+		exit(1);
+	}
+
+	while (1) {
+		collapse(t);
+
 		if (!(t[0].kind == TokOp && t[1].kind == TokNum && t[2].kind == TokOp)) {
 			fprintf(stderr, "Error: invalid token order\n");
 			exit(1);
@@ -301,7 +366,7 @@ static real eval(Tok *t) {
 
 static void cleanup() {
 	for (size_t i = 0; i < toks_size; i++) {
-		if (toks[i].kind == TokFunc)
+		if (toks[i].kind == TokIdent)
 			free(toks[i].Str);
 	}
 }
@@ -312,6 +377,8 @@ static real fn_mod(real *args)   { return fmod(args[0], args[1]); }
 static real fn_round(real *args) { return round(args[0]); }
 static real fn_floor(real *args) { return floor(args[0]); }
 static real fn_ceil(real *args)  { return ceil(args[0]); }
+static real fn_sin(real *args) { return sin(args[0]); }
+static real fn_cos(real *args)  { return cos(args[0]); }
 
 int main(int argc, char **argv) {
 	if (argc != 2 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
@@ -324,6 +391,11 @@ int main(int argc, char **argv) {
 	add_func("round", fn_round, 1);
 	add_func("floor", fn_floor, 1);
 	add_func("ceil", fn_ceil, 1);
+	add_func("sin", fn_sin, 1);
+	add_func("cos", fn_cos, 1);
+	unset_var("x");
+	set_var("pi", M_PI);
+	set_var("e", M_E);
 	tokenize(argv[1]);
 	print_toks();
 	real res = eval(toks);
